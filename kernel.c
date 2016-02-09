@@ -12,6 +12,7 @@
 typedef struct {
   int isActive;
   int stackPointer;
+  int waiting;
 } process;
 
 process processTable[8];
@@ -30,7 +31,7 @@ void handleInterrupt21(int ax, int bx, int cx, int dx);
 void handleTimerInterrupt(int segment, int sp);
 void readFile(char* fileName, char* buffer);
 void deleteFile(char* fileName);
-void executeProgram(char* name);
+void executeProgram(char* name, int shouldWait);
 void terminate();
 void killProcess(char *proc);
 void quitAll();
@@ -149,7 +150,7 @@ void handleInterrupt21(int ax, int bx, int cx, int dx) {
     } else if(ax == 3) {
       readFile(bx, cx);
     } else if(ax == 4) {
-      executeProgram(bx);
+      executeProgram(bx, 0);
     } else if(ax == 5) {
       terminate();
     } else if(ax == 6) {
@@ -165,6 +166,8 @@ void handleInterrupt21(int ax, int bx, int cx, int dx) {
       quitAll();
     } else if(ax == 11) {
       clearScreen();
+    } else if(ax == 12) {
+      executeProgram(bx, 1);
     }
 }
 
@@ -179,7 +182,7 @@ void handleTimerInterrupt(int segment, int sp) {
     processTable[currentProcess].stackPointer = sp;
   }
   for (i = currentProcess+1; i < 8; i++) {
-    if (processTable[i].isActive) {
+    if (processTable[i].isActive && processTable[i].waiting == -1) {
       newSegment = (i + 2) * 0x1000;
       newSP = processTable[i].stackPointer;
       currentProcess = i;
@@ -187,7 +190,7 @@ void handleTimerInterrupt(int segment, int sp) {
     }
   }
   for (i = 0; i <= currentProcess; i++) {
-    if (processTable[i].isActive) {
+    if (processTable[i].isActive && processTable[i].waiting == -1) {
       newSegment = (i + 2) * 0x1000;
       newSP = processTable[i].stackPointer;
       currentProcess = i;
@@ -267,7 +270,7 @@ void deleteFile(char* fileName) {
   }
 }
 
-void executeProgram(char* name) {
+void executeProgram(char* name, int shouldWait) {
   int i, j;
     int segment;
     char buffer[13312];
@@ -278,6 +281,9 @@ void executeProgram(char* name) {
         processTable[i].stackPointer = 0xff00;
         break;
       }
+    }
+    if (shouldWait) {
+      processTable[currentProcess].waiting = i;
     }
     restoreDataSegment();
 
@@ -294,9 +300,15 @@ void executeProgram(char* name) {
 }
 
 void terminate() {
+  int i;
   setKernelDataSegment();
   processTable[currentProcess].isActive = 0;
   processTable[currentProcess].stackPointer = 0xff00;
+  for (i = 0; i < 8; i++) {
+    if (processTable[i].waiting == currentProcess) {
+      processTable[i].waiting = -1;
+    }
+  }
   while(1);
 }
 
@@ -398,11 +410,14 @@ void initializeProcessTable() {
   int i;
   int active;
   int stackPointer;
+  int waiting;
   active = 0;
   stackPointer = 0xff00;
+  waiting = -1;
   for (i = 0; i < 8; i++) {
     processTable[i].isActive = active;
     processTable[i].stackPointer = stackPointer;
+    processTable[i].waiting = waiting;
   }
 }
 
